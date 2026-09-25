@@ -37,6 +37,10 @@ export class WorldScene {
 
     this.animId = null;
     this.houseLightsOn = true;
+    this.resizeObserver = null;
+    this.pointerStartX = 0;
+    this.pointerStartY = 0;
+    this.pointerStartTime = 0;
 
     this.init();
   }
@@ -44,34 +48,46 @@ export class WorldScene {
   init() {
     const width = this.container.clientWidth || window.innerWidth;
     const height = this.container.clientHeight || window.innerHeight;
+    const aspect = width / height;
 
     // 1. Scene & Atmospheric Fog
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0xd7ecfc, 0.0035);
 
-    // 2. Camera
-    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.5, 450);
+    // 2. Camera with responsive FOV (wider on portrait screens to frame mountains & chalet nicely)
+    const initialFov = aspect < 1.0 ? 45 + (1 - aspect) * 20 : 45;
+    this.camera = new THREE.PerspectiveCamera(initialFov, aspect, 0.5, 450);
     this.camera.position.set(22, 24, 38);
 
     // 3. Renderer with high-end post-like tone mapping & shadows
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     this.renderer.setSize(width, height);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
 
+    // Ensure touch gestures don't trigger native scrolling on mobile
+    this.renderer.domElement.style.touchAction = 'none';
+    this.renderer.domElement.style.width = '100%';
+    this.renderer.domElement.style.height = '100%';
+    this.renderer.domElement.style.display = 'block';
+
     this.container.appendChild(this.renderer.domElement);
 
-    // 4. OrbitControls
+    // 4. OrbitControls with smooth touch gestures
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.05;
+    this.controls.dampingFactor = 0.06;
     this.controls.target.set(-8, 3, 2);
     this.controls.minDistance = 6;
     this.controls.maxDistance = 140;
     this.controls.maxPolarAngle = Math.PI / 2 - 0.04; // don't go below ground level
+    this.controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
     this.controls.update();
 
     // 5. Build 3D World Components
@@ -83,12 +99,19 @@ export class WorldScene {
     // 6. Setup Landmark Colliders for Interactive Clicks
     this.setupLandmarks();
 
-    // 7. Event Listeners
+    // 7. Event Listeners (Window Resize + ResizeObserver + Tap/Click gestures)
     this.onWindowResize = this.onWindowResize.bind(this);
     this.onPointerDown = this.onPointerDown.bind(this);
+    this.onPointerUp = this.onPointerUp.bind(this);
 
     window.addEventListener('resize', this.onWindowResize);
+    if (window.ResizeObserver) {
+      this.resizeObserver = new ResizeObserver(() => this.onWindowResize());
+      this.resizeObserver.observe(this.container);
+    }
+
     this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
+    this.renderer.domElement.addEventListener('pointerup', this.onPointerUp);
 
     // 8. Start Animation Loop
     this.animate = this.animate.bind(this);
@@ -151,8 +174,20 @@ export class WorldScene {
   }
 
   onPointerDown(event) {
-    // Don't trigger if right-clicking or dragging heavily
     if (event.button !== 0) return;
+    this.pointerStartX = event.clientX;
+    this.pointerStartY = event.clientY;
+    this.pointerStartTime = performance.now();
+  }
+
+  onPointerUp(event) {
+    if (event.button !== 0) return;
+    const dist = Math.hypot(event.clientX - this.pointerStartX, event.clientY - this.pointerStartY);
+    const elapsed = performance.now() - this.pointerStartTime;
+
+    // Distinguish between a click/tap and a camera orbit/drag gesture
+    // If user dragged more than 8 pixels or held for longer than 350ms, do not trigger landmark
+    if (dist > 8 || elapsed > 350) return;
 
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -258,11 +293,24 @@ export class WorldScene {
 
   onWindowResize() {
     if (!this.container || !this.camera || !this.renderer) return;
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
-    this.camera.aspect = width / height;
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || window.innerHeight;
+    if (width === 0 || height === 0) return;
+
+    const aspect = width / height;
+    this.camera.aspect = aspect;
+
+    // Responsive FOV: on vertical/mobile screens (aspect < 1.0),
+    // widen FOV so mountains, river, and chalet fit naturally without cropping
+    if (aspect < 1.0) {
+      this.camera.fov = 45 + (1 - aspect) * 20;
+    } else {
+      this.camera.fov = 45;
+    }
     this.camera.updateProjectionMatrix();
+
     this.renderer.setSize(width, height);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   }
 
   animate() {
@@ -315,8 +363,13 @@ export class WorldScene {
   destroy() {
     if (this.animId) cancelAnimationFrame(this.animId);
     window.removeEventListener('resize', this.onWindowResize);
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
     if (this.renderer && this.renderer.domElement) {
       this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown);
+      this.renderer.domElement.removeEventListener('pointerup', this.onPointerUp);
       if (this.container && this.container.contains(this.renderer.domElement)) {
         this.container.removeChild(this.renderer.domElement);
       }

@@ -49,17 +49,47 @@
 
 /* Clean minimal scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: rgba(15, 23, 42, 0.4);
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(148, 163, 184, 0.5);
 }
+
+/* Hide scrollbar for clean horizontal pill scrolling on touch / mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area support for iOS / Android notch and home bars */
+.safe-top {
+  padding-top: max(1rem, env(safe-area-inset-top, 1rem));
+}
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+}
+.safe-left {
+  padding-left: max(1rem, env(safe-area-inset-left, 1rem));
+}
+.safe-right {
+  padding-right: max(1rem, env(safe-area-inset-right, 1rem));
+}
+
+/* Prevent double-tap zoom delay on mobile buttons */
+button, input, select {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 
